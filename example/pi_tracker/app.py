@@ -23,6 +23,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cx", type=float, required=True, help="Camera cx in pixels")
     parser.add_argument("--cy", type=float, required=True, help="Camera cy in pixels")
     parser.add_argument("--family", type=str, default="tag36h11", help="AprilTag family")
+    parser.add_argument("--input", type=str, help="Image or video file input. If omitted, use a live camera source.")
     parser.add_argument("--camera-id", type=int, default=0, help="OpenCV camera ID fallback")
     parser.add_argument("--use-picamera2", action="store_true", help="Use PiCamera2 if installed")
     parser.add_argument("--prefer-opencv", action="store_true", help="Prefer OpenCV AprilTag module when available")
@@ -47,7 +48,7 @@ def run() -> int:
 
     backend = create_backend(args.prefer_opencv, args.family)
     debug_log(args.debug, f"backend={backend.name}, family={args.family}, prefer_opencv={args.prefer_opencv}")
-    src = FrameSource(use_picamera2=args.use_picamera2, camera_id=args.camera_id)
+    src = FrameSource(use_picamera2=args.use_picamera2, camera_id=args.camera_id, input_path=args.input)
 
     state: KinematicsState | None = None
     running = True
@@ -61,6 +62,9 @@ def run() -> int:
     try:
         while running:
             frame = src.next()
+            if frame is None:
+                debug_log(args.debug, "input exhausted")
+                break
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             detections = backend.detect(gray)
             debug_log(args.debug, f"detections={len(detections)}")
