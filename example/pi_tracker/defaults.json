@@ -1,0 +1,10 @@
+{
+  "tag_size": 0.16,
+  "fx": 800.0,
+  "fy": 800.0,
+  "cx": 640.0,
+  "cy": 360.0,
+  "family": "tag36h11",
+  "prefer_opencv": true,
+  "v_alpha": 0.45
+}

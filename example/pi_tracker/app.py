@@ -5,6 +5,7 @@ import json
 import signal
 import sys
 import time
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -17,17 +18,28 @@ from .types import KinematicsState
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="AprilTag pose + velocity tracker for Raspberry Pi drone use")
-    parser.add_argument("--tag-size", type=float, required=True, help="AprilTag size in meters")
-    parser.add_argument("--fx", type=float, required=True, help="Camera fx in pixels")
-    parser.add_argument("--fy", type=float, required=True, help="Camera fy in pixels")
-    parser.add_argument("--cx", type=float, required=True, help="Camera cx in pixels")
-    parser.add_argument("--cy", type=float, required=True, help="Camera cy in pixels")
-    parser.add_argument("--family", type=str, default="tag36h11", help="AprilTag family")
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=str(Path(__file__).with_name("defaults.json")),
+        help="JSON defaults file (tag_size/fx/fy/cx/cy/family/prefer_opencv/v_alpha)",
+    )
+    parser.add_argument("--tag-size", type=float, help="AprilTag size in meters")
+    parser.add_argument("--fx", type=float, help="Camera fx in pixels")
+    parser.add_argument("--fy", type=float, help="Camera fy in pixels")
+    parser.add_argument("--cx", type=float, help="Camera cx in pixels")
+    parser.add_argument("--cy", type=float, help="Camera cy in pixels")
+    parser.add_argument("--family", type=str, help="AprilTag family")
     parser.add_argument("--input", type=str, help="Image or video file input. If omitted, use a live camera source.")
     parser.add_argument("--camera-id", type=int, default=0, help="OpenCV camera ID fallback")
     parser.add_argument("--use-picamera2", action="store_true", help="Use PiCamera2 if installed")
-    parser.add_argument("--prefer-opencv", action="store_true", help="Prefer OpenCV AprilTag module when available")
-    parser.add_argument("--v-alpha", type=float, default=0.45, help="Velocity low-pass alpha in [0,1]")
+    parser.add_argument(
+        "--prefer-opencv",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Prefer OpenCV AprilTag module when available",
+    )
+    parser.add_argument("--v-alpha", type=float, help="Velocity low-pass alpha in [0,1]")
     parser.add_argument("--draw", action="store_true", help="Display annotated image")
     parser.add_argument("--debug", action="store_true", help="Print debug logs to stderr")
     return parser.parse_args()
@@ -38,16 +50,55 @@ def debug_log(enabled: bool, message: str) -> None:
         print(f"[DEBUG] {message}", file=sys.stderr, flush=True)
 
 
+def load_defaults(config_path: str) -> dict:
+    defaults = {
+        "tag_size": None,
+        "fx": None,
+        "fy": None,
+        "cx": None,
+        "cy": None,
+        "family": "tag36h11",
+        "prefer_opencv": False,
+        "v_alpha": 0.45,
+    }
+    path = Path(config_path)
+    if not path.exists():
+        return defaults
+    with path.open("r", encoding="utf-8") as f:
+        loaded = json.load(f)
+    if not isinstance(loaded, dict):
+        raise ValueError(f"Config file must contain a JSON object: {config_path}")
+    for k in defaults:
+        if k in loaded:
+            defaults[k] = loaded[k]
+    return defaults
+
+
 def run() -> int:
     args = parse_args()
-    if not (0.0 <= args.v_alpha <= 1.0):
+
+    defaults = load_defaults(args.config)
+    tag_size = args.tag_size if args.tag_size is not None else defaults["tag_size"]
+    fx = args.fx if args.fx is not None else defaults["fx"]
+    fy = args.fy if args.fy is not None else defaults["fy"]
+    cx = args.cx if args.cx is not None else defaults["cx"]
+    cy = args.cy if args.cy is not None else defaults["cy"]
+    family = args.family if args.family is not None else defaults["family"]
+    prefer_opencv = args.prefer_opencv if args.prefer_opencv is not None else bool(defaults["prefer_opencv"])
+    v_alpha = args.v_alpha if args.v_alpha is not None else float(defaults["v_alpha"])
+
+    missing = [name for name, value in [("tag_size", tag_size), ("fx", fx), ("fy", fy), ("cx", cx), ("cy", cy)] if value is None]
+    if missing:
+        raise ValueError(f"Missing required values: {', '.join(missing)}. Set them in --config or via CLI flags.")
+
+    if not (0.0 <= v_alpha <= 1.0):
         raise ValueError("--v-alpha must be in [0,1]")
 
-    K = np.array([[args.fx, 0.0, args.cx], [0.0, args.fy, args.cy], [0.0, 0.0, 1.0]], dtype=np.float64)
+    K = np.array([[fx, 0.0, cx], [0.0, fy, cy], [0.0, 0.0, 1.0]], dtype=np.float64)
     dist = np.zeros((4, 1), dtype=np.float64)
 
-    backend = create_backend(args.prefer_opencv, args.family)
-    debug_log(args.debug, f"backend={backend.name}, family={args.family}, prefer_opencv={args.prefer_opencv}")
+    backend = create_backend(prefer_opencv, family)
+    debug_log(args.debug, f"backend={backend.name}, family={family}, prefer_opencv={prefer_opencv}, config={args.config}")
     src = FrameSource(use_picamera2=args.use_picamera2, camera_id=args.camera_id, input_path=args.input)
 
     state: KinematicsState | None = None
@@ -74,12 +125,12 @@ def run() -> int:
 
             for det in detections:
                 try:
-                    pose = backend.estimate_pose(det, tag_size=args.tag_size, K=K, dist=dist)
+                    pose = backend.estimate_pose(det, tag_size=tag_size, K=K, dist=dist)
                 except Exception:
                     debug_log(args.debug, f"pose failed for tag_id={det.tag_id}")
                     continue
 
-                state = estimate_velocity(state, now, pose.position_m, args.v_alpha)
+                state = estimate_velocity(state, now, pose.position_m, v_alpha)
                 target = {
                     "tag_id": det.tag_id,
                     "position_m": {
