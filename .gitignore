@@ -5,4 +5,6 @@
 example/opencv_demo
 example/apriltag_demo
 build/
-
+example/esp32_xiao_wifi_camera/secrets.h
+__pycache__/
+*.pyc

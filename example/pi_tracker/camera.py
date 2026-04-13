@@ -19,6 +19,21 @@ class FrameSource:
         self._exhausted = False
 
         if input_path is not None:
+            if self._looks_like_url(input_path):
+                cap = cv2.VideoCapture(input_path)
+                if not cap.isOpened():
+                    raise RuntimeError(f"Cannot open stream URL: {input_path}")
+
+                def next_stream():
+                    ok, frame = cap.read()
+                    if not ok:
+                        return None
+                    return frame
+
+                self._next = next_stream
+                self._close = cap.release
+                return
+
             path = Path(input_path)
             if not path.exists():
                 raise RuntimeError(f"Input path does not exist: {input_path}")
@@ -80,6 +95,11 @@ class FrameSource:
     @staticmethod
     def _is_image_file(path: Path) -> bool:
         return path.suffix.lower() in {".bmp", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"}
+
+    @staticmethod
+    def _looks_like_url(value: str) -> bool:
+        lower = value.lower()
+        return lower.startswith(("http://", "https://", "rtsp://", "udp://"))
 
     def next(self):
         return self._next()

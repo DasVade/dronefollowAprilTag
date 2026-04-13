@@ -4,7 +4,9 @@
   "fy": 800.0,
   "cx": 640.0,
   "cy": 360.0,
+  "dist_coeffs": [0.0, 0.0, 0.0, 0.0, 0.0],
   "family": "tag36h11",
   "prefer_opencv": true,
+  "undistort": false,
   "v_alpha": 0.45
 }
